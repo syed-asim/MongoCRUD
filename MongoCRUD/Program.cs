@@ -66,22 +66,7 @@ namespace MongoCRUD
                             }
                         };
 
-
-            var sort = new BsonDocument("$sort", new BsonDocument { { "TotalProfit", -1 }, /*{ "totalBeds", -1 }*/ });
-            var pipeline = new[] { match2,/*project,*/ group, sort };
-
-            var db = GetDatabase();
-            var match = new BsonDocument
-                        {
-                            {
-                                "$match",
-                                new BsonDocument
-                                {
-                                    {"Region", "Asia"}
-                                }
-                            }
-                        };
-            var proj = new BsonDocument
+            var project = new BsonDocument
                         {
                             {
                                 "$project",
@@ -95,14 +80,28 @@ namespace MongoCRUD
                                 }
                             }
                         };
-            var pipelineForView = new BsonDocument[] { match2,/*project,*/ group, sort, proj };
-            db.CreateView<BsonDocument, BsonDocument>("rgo", "sales_data", pipelineForView);
-            var vw = db.GetCollection<BsonDocument>("rgo");
-            var rs = vw.CountDocuments(new BsonDocument { });
 
+            var sort = new BsonDocument("$sort", new BsonDocument { { "TotalProfit", -1 }, /*{ "totalBeds", -1 }*/ });
+            var pipeline = new[] { match2, group, project, sort };
 
+            var db = GetDatabase();
+            var match = new BsonDocument
+                        {
+                            {
+                                "$match",
+                                new BsonDocument
+                                {
+                                    {"Region", "Asia"}
+                                }
+                            }
+                        };
+
+            // >> Create View          
+            db.CreateView<BsonDocument, BsonDocument>("rgo", "sales_data", pipeline);
 
             var aggregateOptions = new AggregateOptions { AllowDiskUse = true };
+            
+            // >> Get Data from DB
             var result = collection.Aggregate<BsonDocument>(pipeline, aggregateOptions).ToList();
 
 
