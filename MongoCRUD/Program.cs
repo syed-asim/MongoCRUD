@@ -13,114 +13,147 @@ namespace MongoCRUD
     {
         static void Main(string[] args)
         {
-
-
             IMongoCollection<BsonDocument> collection = GetCollection();
-
-            // >> Data Insert >>>
-            // ImportData(collection);
-
-            // >> Bucket Auto Example
-            //BucketAuto(collection);
-
-            // >> Method 1 
-            var group = new BsonDocument(
-                 "$group", new BsonDocument {
-                    {"_id", new BsonDocument {{ "Region", "$Region" },{ "Country", "$Country" } }},
-                    {"TotalProfit", new BsonDocument("$sum", "$TotalProfit")},
-                    {"TotalCost", new BsonDocument("$sum", "$TotalCost")},
-                 });
-
-
-
-            var match3 = new BsonDocument
-                {
-                    {
-                        "$match",
-                        new BsonDocument
-                            {
-                                {"Count", new BsonDocument
-                                                   {
-                                                       {
-                                                           "$gte", 2
-                                                       }
-                                                   }}
-                            }
-                    }
-                };
-
-            var match2 = new BsonDocument
-                        {
-                            {
-                                "$match",
-                                new BsonDocument
-                                {
-                                    { "Region", new BsonDocument{
-                                        {  "$in",
-                                        new BsonArray {
-                                            "Sub-Saharan Africa" ,
-                                            "Europe"
-                                        } }
-                                        } }
-                                }
-                            }
-                        };
-
-            var project = new BsonDocument
-                        {
-                            {
-                                "$project",
-                                new BsonDocument
-                                {
-                                    {"_id", 0},
-                                    {"Region","$_id.Region"},
-                                    {"Country","$_id.Country"},
-                                    {"TotalProfit",1 },
-                                    {"TotalCost",1 }
-                                }
-                            }
-                        };
-
-            var sort = new BsonDocument("$sort", new BsonDocument { { "TotalProfit", -1 }, /*{ "totalBeds", -1 }*/ });
-            var pipeline = new[] { match2, group, project, sort };
-
-            var db = GetDatabase();
-            var match = new BsonDocument
-                        {
-                            {
-                                "$match",
-                                new BsonDocument
-                                {
-                                    {"Region", "Asia"}
-                                }
-                            }
-                        };
-
-            // >> Create View          
-            db.CreateView<BsonDocument, BsonDocument>("rgo", "sales_data", pipeline);
-
-            var aggregateOptions = new AggregateOptions { AllowDiskUse = true };
-            
-            // >> Get Data from DB
-            var result = collection.Aggregate<BsonDocument>(pipeline, aggregateOptions).ToList();
-
-
-            // Method 2 >>>
-
-            //var agg = collection.Aggregate()
-            //    .Group(
-            //    new BsonDocument {
-            //        {"_id",new BsonDocument {{ "bedtype", "$bed_type"},{ "roomtype", "$room_type" } } },
-            //        {"totalReviews", new BsonDocument("$sum", "$number_of_reviews")},
-            //        {"totalBeds", new BsonDocument ("$sum", "$beds")}
-            //    })
-            //    .Sort(new BsonDocument { { "_id.roomtype", 1 }, { "totalBeds", -1 } }).ToList();
-
-
+            var query = new QueryModel();
+            query.PrimaryFields.Add(new Field { FieldName = "Region" });
+            query.SecondaryFields.Add(new Field { FieldName = "TotalCost", Measure = "sum" });
+            query.SecondaryFields.Add(new Field { FieldName = "TotalProfit", Measure = "avg" });
+            query.Filters.Add(new Filter
+            {
+                FieldName = "Region",
+                FieldValue = new List<object> { "Sub-Saharan Africa", "Europe", "Middle East and North Africa", "Central America and the Caribbean", "Asia" },
+                Operation = "in"
+            });
+            query.SortBy.Add(new Field { FieldName = "Region", OrderBy = 1 });
+            var result = GetData(query);
             foreach (var example in result)
             {
                 Console.WriteLine(example);
             }
+        }
+
+        public static dynamic GetData(QueryModel query)
+        {
+            var collection = GetCollection();
+            BsonDocument matchBd = GetMatchFilters(query);
+            BsonDocument groupBd = GetGroupByFields(query);
+            BsonDocument sortBd = GetSortBy(query);
+            BsonDocument projectBd = GetProjection(query);
+
+            var pipeline = new[] { matchBd, groupBd, projectBd, sortBd };
+            var aggregateOptions = new AggregateOptions { AllowDiskUse = true };
+            var result = collection.Aggregate<BsonDocument>(pipeline, aggregateOptions).ToList();
+
+
+            return result;
+        }
+
+        private static BsonDocument GetProjection(QueryModel query)
+        {
+            BsonDocument projectionFields = new BsonDocument { { "_id", 0 } };
+            foreach (var pf in query.PrimaryFields)
+            {
+                projectionFields.Add(pf.FieldName, "$_id." + pf.FieldName);
+            }
+            foreach (var sf in query.SecondaryFields)
+            {
+                projectionFields.Add(sf.FieldName, 1);
+            }
+            BsonDocument projectBd = new BsonDocument("$project", projectionFields);
+            return projectBd;
+        }
+
+        private static BsonDocument GetSortBy(QueryModel query)
+        {
+            BsonDocument sortBd = new BsonDocument();
+            BsonDocument sortElements = new BsonDocument();
+            foreach (var f in query.SortBy.OrderBy(s => s.Priority))
+            {
+                sortElements.Add(f.FieldName, f.OrderBy);
+            }
+            sortBd.Add("$sort", sortElements);
+            return sortBd;
+        }
+
+        private static BsonDocument GetGroupByFields(QueryModel query)
+        {
+            BsonDocument groupFields = new BsonDocument();
+            BsonDocument idBd = new BsonDocument();
+            foreach (var pf in query.PrimaryFields)
+            {
+                idBd.Add(new BsonElement(pf.FieldName, "$" + pf.FieldName));
+            }
+            groupFields.Add(new BsonElement("_id", idBd));
+            foreach (var sf in query.SecondaryFields)
+            {
+                groupFields.Add(new BsonElement(sf.FieldName, new BsonDocument("$" + sf.Measure, "$" + sf.FieldName)));
+            }
+            var groupBd = new BsonDocument("$group", groupFields);
+            return groupBd;
+        }
+
+        private static BsonDocument GetMatchFilters(QueryModel query)
+        {
+            BsonDocument matchBd = new BsonDocument();
+            BsonDocument matchFilters = new BsonDocument();
+            for (int i = 0; i < query.Filters.Count; i++)
+            {
+                var filter = query.Filters[i];
+
+                switch (filter.Operation)
+                {
+                    case ">":
+                        matchFilters.Add(filter.FieldName,
+                            new BsonDocument { { filter.FieldName, new BsonDocument(new BsonElement("$gt", (BsonValue)filter.FieldValue.FirstOrDefault())) } });
+                        break;
+                    case ">=":
+                        matchFilters.Add(filter.FieldName,
+                            new BsonDocument { { filter.FieldName, new BsonDocument(new BsonElement("$gte", (BsonValue)filter.FieldValue.FirstOrDefault())) } });
+                        break;
+                    case "<":
+                        matchFilters.Add(filter.FieldName,
+                            new BsonDocument { { filter.FieldName, new BsonDocument(new BsonElement("$lt", (BsonValue)filter.FieldValue.FirstOrDefault())) } });
+                        break;
+                    case "<=":
+                        matchFilters.Add(filter.FieldName,
+                            new BsonDocument { { filter.FieldName, new BsonDocument(new BsonElement("$lte", (BsonValue)filter.FieldValue.FirstOrDefault())) } });
+                        break;
+                    case "in":
+                        matchFilters.Add(new BsonElement(filter.FieldName, new BsonDocument { { "$in", new BsonArray(
+                            filter.FieldValue
+                            )}}));
+                        break;
+                    case "like":
+                        break;
+                    case "sw":
+                        break;
+                    case "ew":
+                        break;
+                    default:
+                        matchFilters.Add(new BsonElement(filter.FieldName, (BsonValue)filter.FieldValue.FirstOrDefault()));
+                        break;
+                }
+            }
+            matchBd.Add("$match", matchFilters);
+            return matchBd;
+        }
+
+        private static void AggregateExample2(IMongoCollection<BsonDocument> collection)
+        {
+            var agg = collection.Aggregate()
+                .Group(
+                new BsonDocument {
+                    {"_id",new BsonDocument {{ "bedtype", "$bed_type"},{ "roomtype", "$room_type" } } },
+                    {"totalReviews", new BsonDocument("$sum", "$number_of_reviews")},
+                    {"totalBeds", new BsonDocument ("$sum", "$beds")}
+                })
+                .Sort(new BsonDocument { { "_id.roomtype", 1 }, { "totalBeds", -1 } }).ToList();
+        }
+
+        private static void CreateView(BsonDocument[] pipeline)
+        {
+            var db = GetDatabase();
+            db.CreateView<BsonDocument, BsonDocument>("rgo", "sales_data", pipeline);
         }
 
         private static void ImportData(IMongoCollection<BsonDocument> collection)
