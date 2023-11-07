@@ -172,7 +172,7 @@ namespace MongoCRUD
 
         private static IMongoDatabase GetDatabase()
         {
-            var client = new MongoClient("mongodb+srv://syed:qwer1234@cluster0.vwpbm.mongodb.net/mongo_test? retryWrites =true&w=majority");
+            var client = new MongoClient("mongodb+srv://syed:xxx@cluster0.vwpbm.mongodb.net/mongo_test? retryWrites =true&w=majority");
             var database = client.GetDatabase("mongo_test");
             return database;
         }
